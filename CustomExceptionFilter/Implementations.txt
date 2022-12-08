@@ -1,0 +1,280 @@
+﻿
+MIDDELWARE IS NOTHING BUT A STACK OF CODE BLOCK WHICH CAN BE RUN ONE AFTER OTHER 
+
+Step 1>
+ADD A CLASS IN MY CASE ExceptionHandlingMiddleware Inherit it from  IMiddleware and press ctrl + . for implementation of interface 
+
+  public class ExceptionHandlingMiddleware : IMiddleware
+    {
+        public Task InvokeAsync(HttpContext context, RequestDelegate next)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+Step 2>
+SO WE HAVE TO DO IS TRY AND CATCH THE NEXT METHOD CALL IF THERS AN EXCEPTION IN THE NEXT REQUEST IT WILL BE HANDLED HERE ELSE PASS IT TO THE NEXT MIDDLEWARE
+    
+    public class ExceptionHandlingMiddleware : IMiddleware
+    {
+        public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+        {
+            try
+            {
+                await next(context);
+            }
+            catch (Exception ex)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                await context.Response.WriteAsync(ex.Message);
+            }
+        }
+    }
+
+SO WHERE EVEN IN THE PIPE LINE WE INJECT THE ABOVE CREATED MIDDELWARE THE REQUEST DELEGATE WILL HAVE THE NEXT MIDDELWARE INSIDE THIS PIPELINE
+THE CONTEXT GIVES US THE CONTEXT ON THE HTTP REQUESTS
+
+
+Step 3> REGISTER IN ConfigureServices AND CONFIGURE METHODS
+SO in this case i have this Method in the startup just below  app.UseRouting() so It will pass the requestDelegate next to 
+the nextPiece of middleware
+
+  public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddTransient<ExceptionHandlingMiddleware>();
+
+            services.AddControllers();
+            services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo { Title = "CustomExceptionFilter", Version = "v1" });
+            });
+        }
+
+
+     public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+                app.UseSwagger();
+                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "CustomExceptionFilter v1"));
+            }
+
+            app.UseHttpsRedirection();
+
+            app.UseRouting();
+
+            app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+            });
+        }
+
+-------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------
+STEP 4> AT THIS POINT YOUR GLOBAL EXCEPTION HANDLING IS SETUP IN THE ABOVE 3 STEPS NOW IF YOU WANT TO SHOW USER FRIENDLY MESSAGES TO USERS YOU CAN 
+CREATE A CUSTOM CLASS FOR EACH EXCEPTION AS SHOWN BELOW
+
+1>CREATE A FOLDER YOU CAN NAME WHATEVER YOU WOULD LIKE TO IN MY CASE USERFRIENDLYEXCEPTIONS  
+added a DomainExceptions class that will be the base class we can add a constructor and specify a default message if you want
+The class would look like 
+
+2> WE CAN INCLUDE AS MANY CLASSES WE WANT LIKE BELOW ARE 2 CLASSES SIMILARLY YOU CAN ADD MORE CLASS
+
+  public class DomainExceptions : Exception
+    {
+
+        public DomainExceptions(string message) : base(message)
+        {
+
+        }
+    }
+
+    public class NotFoundException : Exception
+    {
+
+        public NotFoundException(string message) : base(message)
+        {
+
+        }
+    }    
+    
+    public class DuplicateRecordException : Exception
+    {
+
+        public DuplicateRecordException(string message) : base(message)
+        {
+
+        }
+    }
+       
+
+
+    NOW LOOK BELOW HOW I HAVE THROWN EXCEPTION
+ [HttpGet]
+        public IEnumerable<WeatherForecast> Get(string cityName)
+        {
+            if (cityName == "Sydney")
+            {
+                //throw new Exception($"There is No Data For City : {cityName}");
+                throw new NotFoundException($"There is No Data For City : {cityName}");
+                
+            }
+            var rng = new Random();
+            return Enumerable.Range(1, 5).Select(index => new WeatherForecast
+            {
+                Date = DateTime.Now.AddDays(index),
+                TemperatureC = rng.Next(-20, 55),
+                Summary = Summaries[rng.Next(Summaries.Length)]
+            })
+            .ToArray();
+        }   
+        
+        [HttpGet("DuplicateException")]
+        public IEnumerable<WeatherForecast> DuplicateException(string cityName)
+        {
+            if (cityName == "Sydney")
+            {
+                //throw new Exception($"There is No Data For City : {cityName}");
+                //throw new NotFoundException($"There is No Data For City : {cityName}");
+                throw new DuplicateException($"There is No Data For City : {cityName}");
+                
+            }
+            var rng = new Random();
+            return Enumerable.Range(1, 5).Select(index => new WeatherForecast
+            {
+                Date = DateTime.Now.AddDays(index),
+                TemperatureC = rng.Next(-20, 55),
+                Summary = Summaries[rng.Next(Summaries.Length)]
+            })
+            .ToArray();
+        }
+---------------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------------------
+
+Exception Handling Middle Ware would look like This
+
+    public class ExceptionHandlingMiddleware : IMiddleware
+    {
+       public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+       {
+           try
+           {
+               await next(context);
+           }
+           catch (NotFoundException ex)
+           {
+               context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+               await context.Response.WriteAsync(ex.Message);
+           }
+           catch (DuplicateRecordException ex)
+           {
+               context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+               await context.Response.WriteAsync(ex.Message);
+           }
+           catch (Exception ex)
+           {
+               context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+               await context.Response.WriteAsync(ex.Message);
+           }
+        }
+     }
+
+-------------------------------------------------------EMPOWER----------------------------------------
+
+NOW SINCE THERE WERE TO MANY CATCH BLOCKS I HAVE CREATED A PRIVATE FUNCTION  AND CALLED THE PRIVATE FUNCTION IN THE 
+CATCH BLOCK AS YOU CAN SEE BELOW 
+
+ public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+        {
+            try
+            {
+                await next(context);
+            }
+            catch (NotFoundException ex)
+            {
+                await HandleExceptionAsync(context, ex);
+            }
+        }
+
+        private async Task HandleExceptionAsync(HttpContext context,Exception ex)
+        {
+            context.Response.ContentType = "application/json";
+            var exceptionData = GetExceptionDetails(ex);
+            context.Response.StatusCode = exceptionData.StatusCode;
+            await context.Response.WriteAsync(exceptionData.ToString());
+        }  
+        
+        private ResponseModel GetExceptionDetails(Exception ex)
+        {
+            var model = new ResponseModel();
+            var type = ex.GetType().ToString();
+            switch (type)
+            {
+                case "NotFoundException":
+                    model.StatusCode = (int)HttpStatusCode.NotFound;
+                    model.Message = ex.Message;
+                    break;
+                
+                case "DuplicateRecordException":
+                    model.StatusCode = (int)HttpStatusCode.NotFound;
+                    model.Message = ex.Message;
+                    break;
+
+                default:
+                    model.StatusCode = (int)HttpStatusCode.InternalServerError;
+                    model.Message = ex.Message;
+                    break; 
+            }
+            return model;
+        }
+
+        private ResponseModel GetExceptionDetailss(Exception exception)
+        {
+            var model = new ResponseModel();
+            var exceptionType = exception.GetType();
+
+            if (exceptionType == typeof(UnauthorizedAccessException))
+            {
+                model.StatusCode = (int)HttpStatusCode.Unauthorized;
+                model.Message = exception.Message;
+            }
+            else if (exceptionType == typeof(BadResultException))
+            {
+                model.StatusCode = (int)HttpStatusCode.BadRequest;
+                model.Message = exception.Message;
+            }
+            else if (exceptionType == typeof(RecordNotFoundException)
+                || exceptionType == typeof(DuplicateRecordException))
+            {
+                model.StatusCode = (int)HttpStatusCode.PreconditionFailed;
+             //   model.Message = ContentLoader.ReturnLanguageData(exception.Message, "");
+            }
+            else
+            {
+                model.StatusCode = (int)HttpStatusCode.InternalServerError;
+                model.Message = exception.Message;
+            }
+            return model;
+        }
+
+        public class ResponseModel
+        {
+            public int StatusCode { get; set; }
+            public string Message { get; set; }
+            public object Data { get; set; }
+            public List<Errors> Errors { get; set; }
+            public override string ToString()
+            {
+                return JsonSerializer.Serialize(this);
+            }
+        }
+        public class Errors
+        {
+            public string PropertyName { get; set; }
+            public string[] ErrorMessages { get; set; }
+        }
